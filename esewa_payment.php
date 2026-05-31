@@ -1,8 +1,9 @@
 <?php
+
 require_once 'includes/auth.php';
+
 requireLogin();
 
-// Check order id exists
 if (
     !isset($_GET['order_id']) ||
     !is_numeric($_GET['order_id'])
@@ -12,7 +13,6 @@ if (
 
 $orderId = (int)$_GET['order_id'];
 
-// Fetch order
 $sql = "
     SELECT *
     FROM orders
@@ -22,7 +22,11 @@ $sql = "
 
 $stmt = mysqli_prepare($conn, $sql);
 
-mysqli_stmt_bind_param($stmt, "i", $orderId);
+mysqli_stmt_bind_param(
+    $stmt,
+    "i",
+    $orderId
+);
 
 mysqli_stmt_execute($stmt);
 
@@ -32,7 +36,6 @@ $order = mysqli_fetch_assoc($result);
 
 mysqli_stmt_close($stmt);
 
-// Order not found
 if (!$order) {
     die("Order not found");
 }
@@ -43,19 +46,17 @@ $transactionUuid = $order['order_number'];
 
 $productCode = "EPAYTEST";
 
-// Generate eSewa signature
 $signature = generateEsewaSignature(
     $total,
     $transactionUuid,
     $productCode
 );
+
 ?>
 
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>eSewa Payment</title>
 </head>
 <body>
@@ -113,13 +114,13 @@ $signature = generateEsewaSignature(
     <input
         type="hidden"
         name="success_url"
-        value="http://localhost/istore/esewa_success.php"
+        value="http://localhost/istore-lite/esewa_success.php"
     >
 
     <input
         type="hidden"
         name="failure_url"
-        value="http://localhost/istore/esewa_failed.php"
+        value="http://localhost/istore-lite/esewa_failed.php"
     >
 
     <input
@@ -137,8 +138,10 @@ $signature = generateEsewaSignature(
 </form>
 
 <script>
-document.getElementById("esewaForm").submit();
+document
+    .getElementById("esewaForm")
+    .submit();
 </script>
 
 </body>
-</html>
+</html> c

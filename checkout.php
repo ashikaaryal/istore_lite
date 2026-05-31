@@ -3,10 +3,9 @@ require_once 'includes/auth.php';
 requireLogin();
 
 if (empty($_SESSION['cart'])) {
-    header("Location: esawa_payment.php");
+    header("Location: esewa_payment.php");
     exit;
 }
-
 $message = "";
 $error = "";
 $userName = getCurrentUserName();
