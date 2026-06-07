@@ -1,26 +1,24 @@
 <?php
 
 require_once 'includes/auth.php';
+require_once 'esewa.php';
 
 requireLogin();
 
-if (
-    !isset($_GET['order_id']) ||
-    !is_numeric($_GET['order_id'])
-) {
+$orderId = isset($_GET['order_id'])
+    ? (int)$_GET['order_id']
+    : 0;
+
+if ($orderId <= 0) {
     die("Invalid Order ID");
 }
 
-$orderId = (int)$_GET['order_id'];
-
-$sql = "
-    SELECT *
-    FROM orders
-    WHERE id = ?
-    LIMIT 1
-";
-
-$stmt = mysqli_prepare($conn, $sql);
+$stmt = mysqli_prepare(
+    $conn,
+    "SELECT * FROM orders
+     WHERE id = ?
+     LIMIT 1"
+);
 
 mysqli_stmt_bind_param(
     $stmt,
@@ -40,39 +38,41 @@ if (!$order) {
     die("Order not found");
 }
 
-$total = (float)$order['total_amount'];
-
 $transactionUuid = $order['order_number'];
 
 $productCode = "EPAYTEST";
 
+$totalAmount = sprintf(
+    "%.2f",
+    (float)$order['total_amount']
+);
+
 $signature = generateEsewaSignature(
-    $total,
+    $totalAmount,
     $transactionUuid,
     $productCode
 );
 
 ?>
-
 <!DOCTYPE html>
 <html>
 <head>
-    <title>eSewa Payment</title>
+    <title>Redirecting to eSewa</title>
 </head>
 <body>
 
-<h2>Redirecting to eSewa...</h2>
+<h3>Redirecting to eSewa...</h3>
 
 <form
     id="esewaForm"
-    action="https://rc-epay.esewa.com.np/api/epay/main/v2/form"
+   action="https://rc-epay.esewa.com.np/api/epay/main/v2/form"
     method="POST"
 >
 
     <input
         type="hidden"
         name="amount"
-        value="<?php echo $total; ?>"
+        value="<?= $totalAmount ?>"
     >
 
     <input
@@ -84,19 +84,19 @@ $signature = generateEsewaSignature(
     <input
         type="hidden"
         name="total_amount"
-        value="<?php echo $total; ?>"
+        value="<?= $totalAmount ?>"
     >
 
     <input
         type="hidden"
         name="transaction_uuid"
-        value="<?php echo $transactionUuid; ?>"
+        value="<?= htmlspecialchars($transactionUuid) ?>"
     >
 
     <input
         type="hidden"
         name="product_code"
-        value="<?php echo $productCode; ?>"
+        value="<?= $productCode ?>"
     >
 
     <input
@@ -111,17 +111,19 @@ $signature = generateEsewaSignature(
         value="0"
     >
 
+    <!-- Replace with your public URL -->
     <input
-        type="hidden"
-        name="success_url"
-        value="http://localhost/istore-lite/esewa_success.php"
-    >
+    type="hidden"
+    name="success_url"
+    value="http://localhost/istore-lite/esewa_success.php"
+>
 
-    <input
-        type="hidden"
-        name="failure_url"
-        value="http://localhost/istore-lite/esewa_failed.php"
-    >
+<input
+    type="hidden"
+    name="failure_url"
+    value="http://localhost/istore-lite/esewa_failed.php"
+>
+
 
     <input
         type="hidden"
@@ -132,16 +134,20 @@ $signature = generateEsewaSignature(
     <input
         type="hidden"
         name="signature"
-        value="<?php echo $signature; ?>"
+        value="<?= htmlspecialchars($signature) ?>"
     >
+
+    <noscript>
+        <button type="submit">
+            Pay with eSewa
+        </button>
+    </noscript>
 
 </form>
 
 <script>
-document
-    .getElementById("esewaForm")
-    .submit();
+document.getElementById('esewaForm').submit();
 </script>
 
 </body>
-</html> c
+</html>

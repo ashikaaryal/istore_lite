@@ -151,6 +151,57 @@ function clearRememberMeCookie()
     }
 }
 
+// function restoreRememberedSession($conn)
+// {
+//     if (empty($_COOKIE[REMEMBER_ME_COOKIE])) {
+//         return false;
+//     }
+
+//     $parts = explode('|', $_COOKIE[REMEMBER_ME_COOKIE], 2);
+
+//     if (
+//         count($parts) !== 2 ||
+//         !ctype_digit($parts[0])
+//     ) {
+
+//         clearRememberMeCookie();
+
+//         return false;
+//     }
+
+//     $userId = (int)$parts[0];
+
+//     $token = $parts[1];
+
+//     $user = fetchUserById($conn, $userId);
+
+//     if (
+//         !$user ||
+//         !hash_equals(
+//             generateRememberMeToken(
+//                 $userId,
+//                 $user['email']
+//             ),
+//             $token
+//         )
+//     ) {
+
+//         clearRememberMeCookie();
+
+//         return false;
+//     }
+
+//     $_SESSION['user_id'] = (int)$user['id'];
+
+//     $_SESSION['user_name'] = $user['name'];
+
+//     $_SESSION['user_email'] = $user['email'];
+
+//     $_SESSION['role'] = $user['role'];
+
+//     return true;
+// }
+
 function restoreRememberedSession($conn)
 {
     if (empty($_COOKIE[REMEMBER_ME_COOKIE])) {
@@ -159,18 +210,12 @@ function restoreRememberedSession($conn)
 
     $parts = explode('|', $_COOKIE[REMEMBER_ME_COOKIE], 2);
 
-    if (
-        count($parts) !== 2 ||
-        !ctype_digit($parts[0])
-    ) {
-
+    if (count($parts) !== 2 || !ctype_digit($parts[0])) {
         clearRememberMeCookie();
-
         return false;
     }
 
     $userId = (int)$parts[0];
-
     $token = $parts[1];
 
     $user = fetchUserById($conn, $userId);
@@ -185,23 +230,19 @@ function restoreRememberedSession($conn)
             $token
         )
     ) {
-
         clearRememberMeCookie();
-
         return false;
     }
 
+    session_regenerate_id(true);
+
     $_SESSION['user_id'] = (int)$user['id'];
-
     $_SESSION['user_name'] = $user['name'];
-
     $_SESSION['user_email'] = $user['email'];
-
     $_SESSION['role'] = $user['role'];
 
     return true;
 }
-
 /*
 |--------------------------------------------------------------------------
 | SANITIZE
@@ -328,9 +369,7 @@ function generateEsewaSignature(
     $transactionUuid,
     $productCode
 ) {
-
-    // eSewa test secret key
-    $secret = "8gBm/:&EnhH.1/q";
+    $secretKey = "8gBm/:&EnhH.1/q";
 
     $message =
         "total_amount={$totalAmount}," .
@@ -340,11 +379,10 @@ function generateEsewaSignature(
     $hash = hash_hmac(
         'sha256',
         $message,
-        $secret,
+        $secretKey,
         true
     );
 
     return base64_encode($hash);
 }
-
 ?>

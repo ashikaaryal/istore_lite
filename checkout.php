@@ -2,81 +2,50 @@
 require_once 'includes/auth.php';
 requireLogin();
 
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+
 if (empty($_SESSION['cart'])) {
-    header("Location: esewa_payment.php");
+    header("Location: cart.php");
     exit;
 }
-$message = "";
-$error = "";
-$userName = getCurrentUserName();
-$cartCount = getCartCount();
+
 $total = cartGrandTotal();
 
-$defaultName = $_SESSION['user_name'] ?? '';
-$defaultEmail = $_SESSION['user_email'] ?? '';
+$userName  = $_SESSION['user_name'] ?? '';
+$userEmail = $_SESSION['user_email'] ?? '';
+
+$error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-    $customerName = sanitize(trim($_POST['customer_name'] ?? ''));
-    $customerEmailRaw = trim($_POST['customer_email'] ?? '');
-    $customerEmail = filter_var($customerEmailRaw, FILTER_VALIDATE_EMAIL);
-
-    $phoneRaw = trim($_POST['phone'] ?? '');
-    $phone = preg_replace('/\D/', '', $phoneRaw);
-
+    $name    = sanitize(trim($_POST['customer_name'] ?? ''));
+    $email   = filter_var(trim($_POST['customer_email'] ?? ''), FILTER_VALIDATE_EMAIL);
+    $phone   = preg_replace('/\D/', '', $_POST['phone'] ?? '');
     $address = sanitize(trim($_POST['address'] ?? ''));
+    $method  = $_POST['payment_method'] ?? 'cod';
 
-    $paymentMethod = $_POST['payment_method'] ?? 'cod';
-
-    // CHANGED HERE
     $allowedMethods = ['cod', 'esewa'];
 
-    if (
-        !$customerName ||
-        !$customerEmailRaw ||
-        !$customerEmail ||
-        !$phone ||
-        !$address ||
-        !in_array($paymentMethod, $allowedMethods, true)
-    ) {
+    if (!in_array($method, $allowedMethods)) {
+        $method = 'cod';
+    }
 
-        $error = "Please fill in all required fields correctly.";
-
-    } elseif (!preg_match('/^[A-Za-z ]+$/', $customerName)) {
-
-        $error = "Name can contain only letters and spaces.";
-
+    if (!$name || !$email || !$address) {
+        $error = "Please fill all fields correctly.";
     } elseif (!preg_match('/^\d{10}$/', $phone)) {
-
-        $error = "Please enter a valid 10-digit phone number.";
-
+        $error = "Phone number must be 10 digits.";
     } else {
-
-        mysqli_begin_transaction($conn);
 
         try {
 
-            foreach ($_SESSION['cart'] as $item) {
+            mysqli_begin_transaction($conn);
 
-                $dbProduct = fetchProductById($conn, (int)$item['id']);
-
-                if (
-                    !$dbProduct ||
-                    (int)$dbProduct['stock'] < (int)$item['quantity']
-                ) {
-                    throw new Exception(
-                        "One or more items are out of stock."
-                    );
-                }
-            }
-
-            $orderNumber = 'ORD-' . time() . '-' . rand(1000, 9999);
-
+            $orderNumber = 'ORD-' . strtoupper(bin2hex(random_bytes(5)));
             $userId = (int)$_SESSION['user_id'];
 
-            // INSERT ORDER
-            $insertOrder = "
-                INSERT INTO orders
+            $stmt = mysqli_prepare(
+                $conn,
+                "INSERT INTO orders
                 (
                     user_id,
                     order_number,
@@ -85,71 +54,95 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     customer_name,
                     customer_email,
                     phone,
-                    address
+                    address,
+                    payment_method,
+                    payment_status
                 )
                 VALUES
-                (?, ?, ?, 'Pending', ?, ?, ?, ?)
-            ";
-
-            $stmtOrder = mysqli_prepare($conn, $insertOrder);
+                (
+                    ?, ?, ?, 'Pending',
+                    ?, ?, ?, ?,
+                    ?, 'pending'
+                )"
+            );
 
             mysqli_stmt_bind_param(
-                $stmtOrder,
-                "isdssss",
+                $stmt,
+                "isdsssss",
                 $userId,
                 $orderNumber,
                 $total,
-                $customerName,
-                $customerEmail,
+                $name,
+                $email,
                 $phone,
-                $address
+                $address,
+                $method
             );
 
-            mysqli_stmt_execute($stmtOrder);
-
-            if (mysqli_stmt_affected_rows($stmtOrder) <= 0) {
-                throw new Exception("Failed to create order.");
-            }
+            mysqli_stmt_execute($stmt);
 
             $orderId = mysqli_insert_id($conn);
 
-            mysqli_stmt_close($stmtOrder);
-
-            // INSERT ORDER ITEMS
-            $insertItem = "
-                INSERT INTO order_items
-                (
-                    order_id,
-                    product_id,
-                    product_name,
-                    price,
-                    quantity,
-                    subtotal
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-            ";
-
-            $stmtItem = mysqli_prepare($conn, $insertItem);
-
-            // UPDATE STOCK
-            $updateStock = "
-                UPDATE products
-                SET stock = stock - ?
-                WHERE id = ? AND stock >= ?
-            ";
-
-            $stmtStock = mysqli_prepare($conn, $updateStock);
+            mysqli_stmt_close($stmt);
 
             foreach ($_SESSION['cart'] as $item) {
 
-                $productId = (int)$item['id'];
+                $productId   = (int)$item['id'];
                 $productName = $item['name'];
-                $price = (float)$item['price'];
-                $quantity = (int)$item['quantity'];
-                $subtotal = $price * $quantity;
+                $price       = (float)$item['price'];
+                $quantity    = (int)$item['quantity'];
+                $subtotal    = $price * $quantity;
+
+                // Check stock
+                $stmt = mysqli_prepare(
+                    $conn,
+                    "SELECT stock FROM products WHERE id = ?"
+                );
 
                 mysqli_stmt_bind_param(
-                    $stmtItem,
+                    $stmt,
+                    "i",
+                    $productId
+                );
+
+                mysqli_stmt_execute($stmt);
+
+                $result = mysqli_stmt_get_result($stmt);
+
+                $product = mysqli_fetch_assoc($result);
+
+                mysqli_stmt_close($stmt);
+
+                if (!$product) {
+                    throw new Exception("Product not found.");
+                }
+
+                if ($product['stock'] < $quantity) {
+                    throw new Exception(
+                        $productName . " does not have enough stock."
+                    );
+                }
+
+                // Insert order item
+                $stmt = mysqli_prepare(
+                    $conn,
+                    "INSERT INTO order_items
+                    (
+                        order_id,
+                        product_id,
+                        product_name,
+                        price,
+                        quantity,
+                        subtotal
+                    )
+                    VALUES
+                    (
+                        ?, ?, ?, ?, ?, ?
+                    )"
+                );
+
+                mysqli_stmt_bind_param(
+                    $stmt,
                     "iisdid",
                     $orderId,
                     $productId,
@@ -159,65 +152,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $subtotal
                 );
 
-                mysqli_stmt_execute($stmtItem);
+                mysqli_stmt_execute($stmt);
 
-                mysqli_stmt_bind_param(
-                    $stmtStock,
-                    "iii",
-                    $quantity,
-                    $productId,
-                    $quantity
+                mysqli_stmt_close($stmt);
+
+                // Update stock
+                $stmt = mysqli_prepare(
+                    $conn,
+                    "UPDATE products
+                     SET stock = stock - ?
+                     WHERE id = ?"
                 );
 
-                mysqli_stmt_execute($stmtStock);
+                mysqli_stmt_bind_param(
+                    $stmt,
+                    "ii",
+                    $quantity,
+                    $productId
+                );
 
-                if (mysqli_stmt_affected_rows($stmtStock) <= 0) {
-                    throw new Exception(
-                        "Failed to update stock for product ID " . $productId
-                    );
-                }
+                mysqli_stmt_execute($stmt);
+
+                mysqli_stmt_close($stmt);
             }
-
-            mysqli_stmt_close($stmtItem);
-            mysqli_stmt_close($stmtStock);
 
             mysqli_commit($conn);
 
-            // PAYMENT METHOD
-            if ($paymentMethod === 'esewa') {
+            if ($method === 'esewa') {
 
-                mysqli_query(
-                    $conn,
-                    "UPDATE orders 
-                     SET payment_method='esewa',
-                         payment_status='pending'
-                     WHERE id=$orderId"
+                header(
+                    "Location: esewa_payment.php?order_id=" .
+                    $orderId
                 );
-
-                header("Location: esewa_payment.php?order_id=" . $orderId);
-                exit;
 
             } else {
 
-                mysqli_query(
-                    $conn,
-                    "UPDATE orders 
-                     SET payment_method='cod',
-                         payment_status='pending'
-                     WHERE id=$orderId"
-                );
-
                 $_SESSION['cart'] = [];
 
-                header("Location: order_success.php?order_id=" . $orderId);
-                exit;
+                header(
+                    "Location: order_success.php?order_id=" .
+                    $orderId
+                );
             }
+
+            exit;
 
         } catch (Exception $e) {
 
             mysqli_rollback($conn);
 
-            $error = $e->getMessage();
+            error_log($e->getMessage());
+
+            $error = "Unable to complete order. Please try again.";
         }
     }
 }
@@ -226,11 +212,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Checkout - iStore Lite</title>
-
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Checkout - iStore Lite</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
@@ -306,59 +291,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <form method="POST">
 
                 <div class="form-group">
-
                     <label for="customer_name">Full Name</label>
-
                     <input
                         type="text"
                         id="customer_name"
                         name="customer_name"
-                        value="<?php echo sanitize($defaultName); ?>"
+                        value="<?php echo sanitize($userName); ?>"
                         required
                     >
-
                 </div>
 
                 <div class="form-group">
-
                     <label for="customer_email">Email</label>
-
                     <input
                         type="email"
                         id="customer_email"
                         name="customer_email"
-                        value="<?php echo sanitize($defaultEmail); ?>"
+                        value="<?php echo sanitize($userEmail); ?>"
                         required
                     >
-
                 </div>
 
                 <div class="form-group">
-
                     <label for="phone">Phone</label>
-
                     <input
                         type="tel"
                         id="phone"
                         name="phone"
-                        pattern="\d{10}"
+                        pattern="[0-9]{10}"
                         maxlength="10"
                         required
                     >
-
                 </div>
 
                 <div class="form-group">
-
                     <label for="address">Shipping Address</label>
-
                     <textarea
                         id="address"
                         name="address"
                         rows="5"
                         required
                     ></textarea>
-
                 </div>
 
                 <div class="form-group">
@@ -413,12 +386,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <strong>
                         Rs.
-                        <?php
-                        echo number_format(
+                        <?php echo number_format(
                             $item['price'] * $item['quantity'],
                             2
-                        );
-                        ?>
+                        ); ?>
                     </strong>
 
                 </div>

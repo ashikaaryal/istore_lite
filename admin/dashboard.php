@@ -91,7 +91,6 @@ if ($topProductsQuery) {
     <main class="admin-main">
         <div class="section-head">
             <h2>Admin Dashboard</h2>
-            <p>Overview of products, users, orders, and store activity.</p>
         </div>
 
         <div class="stats-grid">
